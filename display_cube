@@ -1,0 +1,251 @@
+#!/usr/bin/python3
+
+from math import *
+from mpmath import *
+import sys
+import re
+import os
+import numpy as np
+import contextlib
+with contextlib.redirect_stdout(None):
+	import pygame
+	from pygame.locals import *
+
+def wait_mouse_up(clockFps):
+	x = 1
+
+	while (x == 1):
+		for event in pygame.event.get():
+			if (event.type == MOUSEBUTTONUP):
+				x = 0
+				break
+		clockFps.tick(60)
+
+def wait_key_up(clockFps):
+	x = 1
+
+	while (x == 1):
+		for event in pygame.event.get():
+			if (event.type == KEYUP):
+				x = 0
+				break
+		clockFps.tick(60)
+
+def rotatePoint(point, degree):
+
+	Rx = np.array([[1.0,         0.0,          0.0, 0.0],
+					[0.0, cos(degree[0]), -sin(degree[0]), 0.0],
+			  		[0.0, sin(degree[0]),  cos(degree[0]), 0.0],
+			  		[0.0,         0.0,          0.0, 1.0]])
+	Ry = np.array([[ cos(degree[1]), 0.0, sin(degree[1]), 0.0],
+			  		[         0.0, 1.0,         0.0, 0.0],
+			  		[-sin(degree[1]), 0.0, cos(degree[1]), 0.0],
+			  		[         0.0, 0.0,         0.0, 1.0]])
+	Rz = np.array([[cos(degree[2]), -sin(degree[2]), 0.0, 0.0],
+			  		[sin(degree[2]),  cos(degree[2]), 0.0, 0.0],
+			  		[        0.0,          0.0, 1.0, 0.0],
+			  		[        0.0,          0.0, 0.0, 1.0]])
+	return (Rx.dot(Ry).dot(Rz).dot(point))
+
+def movePoint(point, travel):
+	T = np.array([[1.0, 0.0, 0.0, travel[0]],
+				  [0.0, 1.0, 0.0, travel[1]],
+				  [0.0, 0.0, 1.0, travel[2]],
+				  [0.0, 0.0, 0.0,       1.0]])
+	return (T.dot(point))
+
+def scalePoint(point, scale):
+	S = np.array([[scale[0],      0.0,      0.0, 0.0],
+				  [     0.0, scale[1],      0.0, 0.0],
+				  [     0.0,      0.0, scale[2], 0.0],
+				  [     0.0,      0.0,      0.0, 1.0]])
+	return (S.dot(point))
+
+def displayPoint(point, camera, window, width, height, fov, color):
+
+	##### W2V #####
+	# Matrice pour calculer les coordonnées de chaques points en fonction de la position et de la direction de la caméra.
+
+	if (point[2] < 0):
+
+		forward = np.array([0.0, 0.0, 0.0])
+		side = np.array([0.0, 0.0, 0.0])
+		up = np.array([0.0, 0.0, 0.0])
+
+		forward[0] = camera[3] - camera[0]
+		forward[1] = camera[4] - camera[1]
+		forward[2] = camera[5] - camera[2]
+
+		up[0] = camera[6]
+		up[1] = camera[7]
+		up[2] = camera[8]
+
+		forward = forward/np.linalg.norm(forward, keepdims=True)
+
+		side = np.cross(forward, up)
+		side = side/np.linalg.norm(side, keepdims=True)
+
+		up = np.cross(side, forward)
+
+		V = np.array([[side[0], side[1], side[2], 0.0],
+					  [up[0], up[1], up[2], 0.0],
+					  [-forward[0], -forward[1], -forward[2], 0.0],
+					  [  0.0,   0.0,   0.0, 1.0]])
+		V = movePoint(V, [-camera[0], -camera[1], -camera[2]])
+
+		###
+
+		# Zc = [np.linalg.norm(camera[0] - camera[3]), np.linalg.norm(camera[1] - camera[4]), np.linalg.norm(camera[2] - camera[5])]
+		# Xc = np.cross([np.linalg.norm(camera[6]), np.linalg.norm(camera[7]), np.linalg.norm(camera[8])], Zc)
+		# Yc = np.cross(Zc, Xc)
+
+		# V = np.array([[Xc[0], Xc[1], Xc[2], 0.0],
+		# 			  [Yc[0], Yc[1], Yc[2], 0.0],
+		# 			  [-Zc[0], -Zc[1], -Zc[2], 0.0],
+		# 			  [  0.0,   0.0,   0.0, 1.0]])
+		# V = movePoint(V, [-camera[0], -camera[1], -camera[2]])
+
+		##### V2P #####
+		# Matrice de projection
+
+		aspect = width/height # width/height
+		Znear = 0.1
+		Zfar = 50.0
+		fovx = 1.0 / tan(fov[0]/2.0)
+		fovy = 1.0 / tan(fov[1]/2.0)
+
+		P = np.array([[cot(fovx/2)/aspect, 0.0, 0.0, 0.0],
+					  [0.0, cot(fovy/2), 0.0, 0.0],
+					  [0.0, 0.0, (Zfar + Znear)/(Znear - Zfar), 2 * Znear * Zfar/(Znear - Zfar)],
+					  [0.0, 0.0, -1.0, 0.0]])
+
+		result = V.dot(P).dot(point)
+
+		# print(result[0])
+		# print(result[1])
+		# print(result[2])
+		# print(result[3])
+
+		x = result[0] * width / 2.0 / result[2] + (width / 2)
+		y = result[1] * height / 2.0 / result[2] + (height / 2)
+
+		# print("-")
+		# print(x)
+		# print(y)
+		# print("------------")
+		pygame.draw.rect(window, color, (x, y, 7, 7))
+
+def main():
+	going = True
+
+	pygame.init()
+	pygame.mouse.set_visible(False)
+	# pygame.event.set_grab(True)
+	clockFps = pygame.time.Clock()
+	pygame.display.set_caption("CUBE")
+	window = pygame.display.set_mode((1280, 720))
+	pygame.event.clear()
+
+	# camera : [x,y,z for location, x,y,z for aim, x,y,z for direction]
+	camera = [0.0, 0.0, 0.0, 0.0, 0.0, -100.0, 0.0, 1.0, 0.0]
+	fov = [90.0, 90.0]
+	width = 1280
+	height = 720
+
+	point = np.array([[-1.0], [1.0], [-1.0], [1]])
+	point1 = np.array([[1.0], [1.0], [-1.0], [1]])
+	point2 = np.array([[-1.0], [-1.0], [-1.0], [1]])
+	point3 = np.array([[1.0], [-1.0], [-1.0], [1]])
+	point4 = np.array([[-1.0], [1.0], [1.0], [1]])
+	point5 = np.array([[1.0], [1.0], [1.0], [1]])
+	point6 = np.array([[-1.0], [-1.0], [1.0], [1]])
+	point7 = np.array([[1.0], [-1.0], [1.0], [1]])
+
+	point = movePoint(point, [0, 0, -10])
+	point1 = movePoint(point1, [0, 0, -10])
+	point2 = movePoint(point2, [0, 0, -10])
+	point3 = movePoint(point3, [0, 0, -10])
+	point4 = movePoint(point4, [0, 0, -10])
+	point5 = movePoint(point5, [0, 0, -10])
+	point6 = movePoint(point6, [0, 0, -10])
+	point7 = movePoint(point7, [0, 0, -10])
+
+	x = 0
+	y = 0
+	z = 0
+
+	while (going == True):
+		window.fill((0, 0, 0))
+		clockFps.tick(120)
+		displayPoint(point, camera, window, width, height, fov, (255, 0, 0))
+		displayPoint(point1, camera, window, width, height, fov, (0, 255, 0))
+		displayPoint(point2, camera, window, width, height, fov, (0, 0, 255))
+		displayPoint(point3, camera, window, width, height, fov, (255, 255, 255))
+		displayPoint(point4, camera, window, width, height, fov, (255, 0, 0))
+		displayPoint(point5, camera, window, width, height, fov, (0, 255, 0))
+		displayPoint(point6, camera, window, width, height, fov, (0, 0, 255))
+		displayPoint(point7, camera, window, width, height, fov, (255, 255, 255))
+		# print("###############")
+		pygame.display.update()
+		for event in pygame.event.get():
+			if (event.type == QUIT):
+				going = False
+			if (event.type == KEYDOWN):
+				if (event.key == K_ESCAPE):
+					going = False
+
+				if event.key == pygame.K_a:
+					x = 0.1
+				if event.key == pygame.K_d:
+					x = -0.1
+				if event.key == pygame.K_z:
+					z = 0.1
+				if event.key == pygame.K_s:
+					z = -0.1
+				if event.key == pygame.K_SPACE:
+					y = 0.1
+				if event.key == pygame.K_LALT:
+					y = -0.1
+			if event.type == pygame.KEYUP:
+				if event.key == pygame.K_a and x > 0:
+					x = 0
+				if event.key == pygame.K_d and x < 0:
+					x = 0
+				if event.key == pygame.K_z and z > 0:
+					z = 0
+				if event.key == pygame.K_s and z < 0:
+					z = 0
+				if event.key == pygame.K_SPACE and y > 0:
+					y = 0
+				if event.key == pygame.K_LALT and y < 0:
+					y = 0
+			# if (event.type == MOUSEMOTION):
+			# 	rx = -event.rel[1]/500.0
+			# 	ry = +event.rel[0]/500.0
+
+			# 	point = rotatePoint(point, [rx, ry, 0])
+			# 	point1 = rotatePoint(point1, [rx, ry, 0])
+			# 	point2 = rotatePoint(point2, [rx, ry, 0])
+			# 	point3 = rotatePoint(point3, [rx, ry, 0])
+			# 	point4 = rotatePoint(point4, [rx, ry, 0])
+			# 	point5 = rotatePoint(point5, [rx, ry, 0])
+			# 	point6 = rotatePoint(point6, [rx, ry, 0])
+			# 	point7 = rotatePoint(point7, [rx, ry, 0])
+
+
+				# print(camera)
+				# print(event)
+
+		point = movePoint(point, [x, y, z])
+		point1 = movePoint(point1, [x, y, z])
+		point2 = movePoint(point2, [x, y, z])
+		point3 = movePoint(point3, [x, y, z])
+		point4 = movePoint(point4, [x, y, z])
+		point5 = movePoint(point5, [x, y, z])
+		point6 = movePoint(point6, [x, y, z])
+		point7 = movePoint(point7, [x, y, z])
+
+	pygame.quit()
+	return (0)
+
+main()
